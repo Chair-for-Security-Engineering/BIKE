@@ -24,4 +24,4 @@ Please see LICENSE for further license instructions.
 Publications
 ---
 
-[1] 
+[1] [Jan Richter-Brockmann, Johannes Mono and Tim Güneysu - Folding BIKE: Scalable Hardware Implementation for Reconfigurable Devices](https://eprint.iacr.org/2020/897.pdf)
