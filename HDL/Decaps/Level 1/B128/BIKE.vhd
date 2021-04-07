@@ -53,8 +53,6 @@ ENTITY BIKE IS
         C_IN_ADDR               : IN  STD_LOGIC_VECTOR(LOG2(R_BLOCKS)-1 DOWNTO 0);
         C0_IN_VALID             : IN  STD_LOGIC;
         C1_IN_VALID             : IN  STD_LOGIC;
-        -- RANDOMNESS ------------------
-        ERROR_RAND              : IN  STD_LOGIC_VECTOR(LOG2(2*R_BITS+1)-1 DOWNTO 0);
         -- SECRET KEY ------------------
         SK0_IN_DIN              : IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
         SK1_IN_DIN              : IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -104,9 +102,6 @@ SIGNAL CNT_NBITER_OUT                               : STD_LOGIC_VECTOR(LOG2(NbIt
 SIGNAL CNT_COMPE_EN, CNT_COMPE_RST, CNT_COMPE_DONE  : STD_LOGIC;
 SIGNAL CNT_COMPE_OUT                                : STD_LOGIC_VECTOR(LOG2(WORDS)-1 DOWNTO 0);
 
-SIGNAL CNT_COPY_EN, CNT_COPY_RST, CNT_COPY_DONE     : STD_LOGIC;
-SIGNAL CNT_COPY_OUT                                 : STD_LOGIC_VECTOR(LOG2(WORDS)-1 DOWNTO 0);
-
 
 -- C0
 SIGNAL C0_SAMP_SAMPLING                             : STD_LOGIC;
@@ -138,22 +133,6 @@ SIGNAL E0P_SAMPLE_RDEN, E0P_SAMPLE_WREN             : STD_LOGIC;
 SIGNAL E1P_SAMPLE_RDEN, E1P_SAMPLE_WREN             : STD_LOGIC;
 SIGNAL EP_SAMPLE_ADDR                               : STD_LOGIC_VECTOR(LOG2(R_BLOCKS)-1 DOWNTO 0);
 SIGNAL EP_SAMPLE_DOUT                               : STD_LOGIC_VECTOR(31 DOWNTO 0);
-
-
--- ERROR PRIME
-SIGNAL ERROR_SEL                                    : STD_LOGIC_VECTOR(1 DOWNTO 0);
-SIGNAL EP_SAMP                                      : STD_LOGIC;
-SIGNAL E0P_SAMP_RDEN, E0P_SAMP_WREN                 : STD_LOGIC;
-SIGNAL E1P_SAMP_RDEN, E1P_SAMP_WREN                 : STD_LOGIC;
-SIGNAL E0P_SAMP_ADDR, E1P_SAMP_ADDR                 : STD_LOGIC_VECTOR(LOG2(R_BLOCKS)-1 DOWNTO 0);
-SIGNAL E0P_SAMP_DOUT, E0P_SAMP_DIN                  : STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL E1P_SAMP_DOUT, E1P_SAMP_DIN                  : STD_LOGIC_VECTOR(31 DOWNTO 0);
-SIGNAL E0P_RDEN, E0P_WREN                           : STD_LOGIC;
-SIGNAL E1P_RDEN, E1P_WREN                           : STD_LOGIC;
-SIGNAL E0P_ADDR, E1P_ADDR                           : STD_LOGIC_VECTOR(LOG2(WORDS)-1 DOWNTO 0);
-SIGNAL E0P_DOUT, E1P_DOUT                           : STD_LOGIC_VECTOR(B_WIDTH-1 DOWNTO 0);
-SIGNAL E0P_DIN, E1P_DIN                             : STD_LOGIC_VECTOR(B_WIDTH-1 DOWNTO 0);
-SIGNAL E_COPY_WREN                                  : STD_LOGIC;
 
 
 -- ERROR PRIME PRIME
@@ -339,10 +318,14 @@ SIGNAL SHA_HASH_ADDR                                : STD_LOGIC_VECTOR( 2 DOWNTO
 SIGNAL HASH_SIZE                                    : STD_LOGIC_VECTOR(19 DOWNTO 0);
 
 
+-- COMPARISON
+SIGNAL E0_SAMPLED_DOUT, E1_SAMPLED_DOUT             : STD_LOGIC_VECTOR(B_WIDTH-1 DOWNTO 0);
+SIGNAL E0_DECODE_DOUT, E1_DECODE_DOUT               : STD_LOGIC_VECTOR(31 DOWNTO 0);
+
 
 -- STATES
 ----------------------------------------------------------------------------------
-TYPE STATES IS (S_RESET, S_SAMPLE_EPRIME, S_COMPUTE_SYNDROME, S_RECOMPUTE_SYNDROME, S_HW_TH, S_BFITER_BG, S_BFITER_BLACK, S_BFITER_GRAY, S_BFITER, S_HAMMING_WEIGHT, S_COPY_E, S_HASH_L, S_SAMPLE_E, S_COMPARE_E0, S_COMPARE_E1, S_COMPARE_HW, S_HASH_K, S_DONE);
+TYPE STATES IS (S_RESET, S_COMPUTE_SYNDROME, S_RECOMPUTE_SYNDROME, S_HW_TH, S_BFITER_BG, S_BFITER_BLACK, S_BFITER_GRAY, S_BFITER, S_HAMMING_WEIGHT, S_HASH_L, S_SAMPLE_E, S_COMPARE_E0, S_COMPARE_E1, S_COMPARE_HW, S_HASH_K, S_DONE);
 SIGNAL STATE : STATES := S_RESET;
 
 
@@ -478,112 +461,7 @@ BEGIN
     ------------------------------------------------------------------------------
 
 
-    -- SAMPLE RANDOM ERROR VECTOR ------------------------------------------------
-    -- in case the decoding fails, a random error vector is used as input to L
-    EPRIME_SAMPLE : ENTITY work.BIKE_SAMPLER_PARALLEL
-    GENERIC MAP (
-        THRESHOLD       => T1
-    )
-    PORT MAP (
-        CLK             => CLK,
-        -- CONTROL PORTS ---------------    
-        RESET           => RESET,
-        ENABLE          => ERROR_SAMPLE_EN,
-        DONE            => ERROR_SAMPLE_DONE,
-        -- RAND ------------------------
-        NEW_POSITION    => ERROR_RAND,
-        -- MEMORY I/O ------------------
-        RDEN_1          => E0P_SAMPLE_RDEN,
-        WREN_1          => E0P_SAMPLE_WREN,
-        RDEN_2          => E1P_SAMPLE_RDEN,
-        WREN_2          => E1P_SAMPLE_WREN,
-        ADDR            => EP_SAMPLE_ADDR,
-        DOUT            => EP_SAMPLE_DOUT,
-        DIN_1           => E0P_SAMP_DOUT,
-        DIN_2           => E1P_SAMP_DOUT
-    );
-    
-    -- multiplexer for scalable interface
-    E_COPY_WREN <= DECODER_RES_OUT AND HW_E_OUT;
-    
-    WITH ERROR_SEL SELECT E0P_RDEN <=
-        '1'                 WHEN "01",
-        E0_COMPE_RDEN       WHEN "11",
-        '0'                 WHEN OTHERS;
-
-    WITH ERROR_SEL SELECT E1P_RDEN <=
-        '1'                 WHEN "01",
-        E1_COMPE_RDEN       WHEN "11",
-        '0'                 WHEN OTHERS;
-
-    WITH ERROR_SEL SELECT E0P_WREN <=
-        E_COPY_WREN     WHEN "01",
-        '0'                 WHEN OTHERS;
-
-    WITH ERROR_SEL SELECT E1P_WREN <=
-        E_COPY_WREN     WHEN "01",
-        '0'                 WHEN OTHERS;
-
-    WITH ERROR_SEL SELECT E0P_ADDR <=
-        CNT_COPY_OUT        WHEN "01",
-        CNT_COMPE_OUT       WHEN "11",
-        (OTHERS => '0')     WHEN OTHERS;
-
-    WITH ERROR_SEL SELECT E1P_ADDR <=
-        CNT_COPY_OUT        WHEN "01",
-        CNT_COMPE_OUT       WHEN "11",
-        (OTHERS => '0')     WHEN OTHERS;
-        
-    WITH ERROR_SEL SELECT E0P_DIN <=
-        E0PP_DOUT           WHEN "01",
-        (OTHERS => '0')     WHEN OTHERS;
-
-    WITH ERROR_SEL SELECT E1P_DIN <=
-        E1PP_DOUT           WHEN "01",
-        (OTHERS => '0')     WHEN OTHERS;
-
-    -- multiplexer for sampling ports
-    WITH ERROR_SEL SELECT EP_SAMP <=
-        '1'                 WHEN "00",
-        '1'                 WHEN "10",
-        '0'                 WHEN OTHERS;
-        
-    WITH ERROR_SEL SELECT E0P_SAMP_RDEN <=
-        E0P_SAMPLE_RDEN     WHEN "00",
-        ERROR0_HASH_RDEN    WHEN "10",
-        '0'                 WHEN OTHERS;
-
-    WITH ERROR_SEL SELECT E1P_SAMP_RDEN <=
-        E1P_SAMPLE_RDEN     WHEN "00",
-        ERROR1_HASH_RDEN    WHEN "10",
-        '0'                 WHEN OTHERS;
-
-    WITH ERROR_SEL SELECT E0P_SAMP_WREN <=
-        E0P_SAMPLE_WREN     WHEN "00",
-        '0'                 WHEN OTHERS;
-
-    WITH ERROR_SEL SELECT E1P_SAMP_WREN <=
-        E1P_SAMPLE_WREN     WHEN "00",
-        '0'                 WHEN OTHERS;
-
-    WITH ERROR_SEL SELECT E0P_SAMP_ADDR <=
-        EP_SAMPLE_ADDR      WHEN "00",
-        ERROR0_HASH_ADDR    WHEN "10",
-        (OTHERS => '0')     WHEN OTHERS;
-
-    WITH ERROR_SEL SELECT E1P_SAMP_ADDR <=
-        EP_SAMPLE_ADDR      WHEN "00",
-        ERROR1_HASH_ADDR    WHEN "10",
-        (OTHERS => '0')     WHEN OTHERS;
-        
-    WITH ERROR_SEL SELECT E0P_SAMP_DIN <=
-        EP_SAMPLE_DOUT      WHEN "00",
-        (OTHERS => '0')     WHEN OTHERS;
-
-    WITH ERROR_SEL SELECT E1P_SAMP_DIN <=
-        EP_SAMPLE_DOUT      WHEN "00",
-        (OTHERS => '0')     WHEN OTHERS;
-
+    -- SRESEULT H-FUNCTION -------------------------------------------------------
     BRAM_EP : ENTITY work.BIKE_BRAM
     GENERIC MAP (
         OUTPUT_BRAM     => 1
@@ -592,29 +470,29 @@ BEGIN
         -- CONTROL PORTS ----------------
         CLK             => CLK,     
         RESET           => RESET,
-        SAMPLING        => EP_SAMP,
+        SAMPLING        => ECONTROL_SAMPLE_EN,
         -- SAMPLING --------------------
-        REN0_SAMP       => E0P_SAMP_RDEN,
-        REN1_SAMP       => E1P_SAMP_RDEN,
-        WEN0_SAMP       => E0P_SAMP_WREN,
-        WEN1_SAMP       => E1P_SAMP_WREN,
-        ADDR0_SAMP      => E0P_SAMP_ADDR,
-        ADDR1_SAMP      => E1P_SAMP_ADDR,
-        DOUT0_SAMP      => E0P_SAMP_DOUT,
-        DOUT1_SAMP      => E1P_SAMP_DOUT,
-        DIN0_SAMP       => E0P_SAMP_DIN,
-        DIN1_SAMP       => E1P_SAMP_DIN,
+        REN0_SAMP       => E0CONTROL_SAMPLE_RDEN,
+        REN1_SAMP       => E1CONTROL_SAMPLE_RDEN,
+        WEN0_SAMP       => E0CONTROL_SAMPLE_WREN,
+        WEN1_SAMP       => E1CONTROL_SAMPLE_WREN,
+        ADDR0_SAMP      => ECONTROL_SAMPLE_ADDR,
+        ADDR1_SAMP      => ECONTROL_SAMPLE_ADDR,
+        DOUT0_SAMP      => E0CONTROL_SAMPLE_DIN,
+        DOUT1_SAMP      => E1CONTROL_SAMPLE_DIN,
+        DIN0_SAMP       => ECONTROL_SAMPLE_DOUT,
+        DIN1_SAMP       => ECONTROL_SAMPLE_DOUT,
         -- COMPUTATION -----------------
-        WEN0            => E0P_WREN,
-        WEN1            => E1P_WREN,
-        REN0            => E0P_RDEN,
-        REN1            => E1P_RDEN,
-        ADDR0           => E0P_ADDR,
-        ADDR1           => E1P_ADDR,
-        DOUT0           => E0P_DOUT,
-        DOUT1           => E1P_DOUT,
-        DIN0            => E0P_DIN,
-        DIN1            => E1P_DIN
+        WEN0            => '0',
+        WEN1            => '0',
+        REN0            => E0_COMPE_RDEN,
+        REN1            => E1_COMPE_RDEN,
+        ADDR0           => CNT_COMPE_OUT,
+        ADDR1           => CNT_COMPE_OUT,
+        DOUT0           => E0_SAMPLED_DOUT,
+        DOUT1           => E1_SAMPLED_DOUT,
+        DIN0            => (OTHERS => '0'),
+        DIN1            => (OTHERS => '0')
     );
     ------------------------------------------------------------------------------    
         
@@ -925,14 +803,12 @@ BEGIN
     -- ERROR VECTOR --------------------------------------------------------------    
     WITH ERRORPP_SEL SELECT E0PP_RDEN <=
         E0_BFITER_RDEN          WHEN "00",
-        '1'                     WHEN "01",
         MUL_VEC_RDEN            WHEN "10",
         E0_COMPE_RDEN           WHEN "11",
         '0'                     WHEN OTHERS;
 
     WITH ERRORPP_SEL SELECT E1PP_RDEN <=
         E1_BFITER_RDEN          WHEN "00",
-        '1'                     WHEN "01",
         MUL_VEC_RDEN            WHEN "10",
         E1_COMPE_RDEN           WHEN "11",
         '0'                     WHEN OTHERS;
@@ -944,19 +820,16 @@ BEGIN
 
     WITH ERRORPP_SEL SELECT E1PP_WREN <=
         E1_BFITER_WREN          WHEN "00",
-        '1'                     WHEN "01",
         '0'                     WHEN OTHERS;
 
     WITH ERRORPP_SEL SELECT E0PP_ADDR <=
         E_BFITER_ADDR           WHEN "00",
-        CNT_COMPE_OUT           WHEN "01",
         MUL_VEC_ADDR            WHEN "10",
         CNT_COMPE_OUT           WHEN "11",
         (OTHERS => '0')         WHEN OTHERS;
 
     WITH ERRORPP_SEL SELECT E1PP_ADDR <=
         E_BFITER_ADDR           WHEN "00",
-        CNT_COMPE_OUT           WHEN "01",
         MUL_VEC_ADDR            WHEN "10",
         CNT_COMPE_OUT           WHEN "11",
         (OTHERS => '0')         WHEN OTHERS;
@@ -978,18 +851,18 @@ BEGIN
         -- CONTROL PORTS ----------------
         CLK             => CLK,     
         RESET           => RESET,
-        SAMPLING        => ECONTROL_SAMPLE_EN,
+        SAMPLING        => HASH_L_EN,
         -- SAMPLING --------------------
-        REN0_SAMP       => E0CONTROL_SAMPLE_RDEN,
-        REN1_SAMP       => E1CONTROL_SAMPLE_RDEN,
-        WEN0_SAMP       => E0CONTROL_SAMPLE_WREN,
-        WEN1_SAMP       => E1CONTROL_SAMPLE_WREN,
-        ADDR0_SAMP      => ECONTROL_SAMPLE_ADDR,
-        ADDR1_SAMP      => ECONTROL_SAMPLE_ADDR,
-        DOUT0_SAMP      => E0CONTROL_SAMPLE_DIN,
-        DOUT1_SAMP      => E1CONTROL_SAMPLE_DIN,
-        DIN0_SAMP       => ECONTROL_SAMPLE_DOUT,
-        DIN1_SAMP       => ECONTROL_SAMPLE_DOUT,
+        REN0_SAMP       => ERROR0_HASH_RDEN,
+        REN1_SAMP       => ERROR1_HASH_RDEN,
+        WEN0_SAMP       => '0',
+        WEN1_SAMP       => '0',
+        ADDR0_SAMP      => ERROR0_HASH_ADDR,
+        ADDR1_SAMP      => ERROR1_HASH_ADDR,
+        DOUT0_SAMP      => E0_DECODE_DOUT,
+        DOUT1_SAMP      => E1_DECODE_DOUT,
+        DIN0_SAMP       => (OTHERS => '0'),
+        DIN1_SAMP       => (OTHERS => '0'),
         -- COMPUTATION -----------------
         WEN0            => E0PP_WREN,
         WEN1            => E1PP_WREN,
@@ -1106,8 +979,8 @@ BEGIN
         ERROR1_RDEN         => ERROR1_HASH_RDEN,
         ERROR0_ADDR         => ERROR0_HASH_ADDR,
         ERROR1_ADDR         => ERROR1_HASH_ADDR,
-        ERROR0_DIN          => E0P_SAMP_DOUT,
-        ERROR1_DIN          => E1P_SAMP_DOUT,
+        ERROR0_DIN          => E0_DECODE_DOUT,
+        ERROR1_DIN          => E1_DECODE_DOUT,
         -- HASH K ----------------------
         HASH_M              => HASH_L_M,
         HASH_VALID          => HASH_L_VALID,
@@ -1216,18 +1089,11 @@ BEGIN
     CNT_COMPE_DONE <= '1' WHEN CNT_COMPE_OUT = STD_LOGIC_VECTOR(TO_UNSIGNED(WORDS-2, LOG2(WORDS))) ELSE '0';
     CNT_COMPE : ENTITY work.BIKE_COUNTER_INC GENERIC MAP(SIZE => LOG2(WORDS), MAX_VALUE => WORDS-1)
     PORT MAP(CLK => CLK, EN => CNT_COMPE_EN, RST => CNT_COMPE_RST, CNT_OUT => CNT_COMPE_OUT);
-    
-    DELAY_EN : FDRE GENERIC MAP (INIT => '0')
-    PORT MAP(Q => CNT_COPY_EN, C => CLK, CE => '1', R => RESET, D => CNT_COMPE_EN);
-    
-    CNT_COPY_DONE <= '1' WHEN CNT_COPY_OUT = STD_LOGIC_VECTOR(TO_UNSIGNED(WORDS-2, LOG2(WORDS))) ELSE '0';
-    CNT_COPY : ENTITY work.BIKE_COUNTER_INC GENERIC MAP(SIZE => LOG2(WORDS), MAX_VALUE => WORDS-1)
-    PORT MAP(CLK => CLK, EN => CNT_COPY_EN, RST => CNT_COPY_RST, CNT_OUT => CNT_COPY_OUT);
 
     DELAY_SEL_E : FDRE GENERIC MAP (INIT => '0')
     PORT MAP(Q => SEL_COMP_ERROR_POLY, C => CLK, CE => '1', R => RESET, D => E0_COMPE_RDEN);
         
-    COMPE_DINA <= E0P_DOUT WHEN SEL_COMP_ERROR_POLY = '1' ELSE E1P_DOUT;
+    COMPE_DINA <= E0_SAMPLED_DOUT WHEN SEL_COMP_ERROR_POLY = '1' ELSE E1_SAMPLED_DOUT;
     COMPE_DINB <= E0PP_DOUT WHEN SEL_COMP_ERROR_POLY = '1' ELSE E1PP_DOUT;    
     
     -- xor both words of the error vectors
@@ -1246,7 +1112,6 @@ BEGIN
             
             -- SELECTION -------
             SYNDROME_SEL        <= "00";
-            ERROR_SEL           <= "00";
             ERRORPP_SEL         <= "00";
             HW_SEL              <= "00";
             
@@ -1275,8 +1140,6 @@ BEGIN
             
             CNT_COMPE_RST       <= '1';
             CNT_COMPE_EN        <= '0';
-            
-            CNT_COPY_RST        <= '1';
             
             -- THRESHOLD -------
             HW_RST              <= '1';
@@ -1313,25 +1176,9 @@ BEGIN
                 WHEN S_RESET            =>                                        
                     -- TRANSITION ------
                     IF (ENABLE = '1') THEN
-                        STATE           <= S_SAMPLE_EPRIME;
-                    ELSE
-                        STATE           <= S_RESET;
-                    END IF;
-                ----------------------------------------------
-
-                ----------------------------------------------
-                WHEN S_SAMPLE_EPRIME           =>
-                    -- SELECTION -------
-                    ERROR_SEL           <= "00";
-
-                    -- SAMPLER ---------
-                    ERROR_SAMPLE_EN     <= '1';
-                                                            
-                    -- TRANSITION ------
-                    IF (ERROR_SAMPLE_DONE = '1') THEN
                         STATE           <= S_COMPUTE_SYNDROME;
                     ELSE
-                        STATE           <= S_SAMPLE_EPRIME;
+                        STATE           <= S_RESET;
                     END IF;
                 ----------------------------------------------
                 
@@ -1339,7 +1186,6 @@ BEGIN
                 WHEN S_COMPUTE_SYNDROME           =>
                     -- SELECTION -------
                     SYNDROME_SEL        <= "01";
-                    ERROR_SEL           <= "00";
                     HW_SEL              <= "01";
                                         
                     -- MULTIPLICATION --
@@ -1363,7 +1209,6 @@ BEGIN
                 WHEN S_RECOMPUTE_SYNDROME         =>
                     -- SELECTION -------
                     SYNDROME_SEL        <= "01";
-                    ERROR_SEL           <= "10";
                     HW_SEL              <= "01";
                     ERRORPP_SEL         <= "10";
                                         
@@ -1409,7 +1254,7 @@ BEGIN
                         DECODER_RES_EN  <= '1';
                         HW_RST              <= '1'; 
                         IF CNT_NBITER_DONE = '1' THEN
-                            STATE       <= S_COPY_E;
+                            STATE       <= S_HASH_L;
                         ELSIF CNT_NBITER_OUT = STD_LOGIC_VECTOR(TO_UNSIGNED(0, LOG2(NbIter+1))) THEN
                             STATE       <= S_BFITER_BG;
                         ELSIF CNT_NBITER_OUT = STD_LOGIC_VECTOR(TO_UNSIGNED(1, LOG2(NbIter+1))) THEN
@@ -1551,33 +1396,32 @@ BEGIN
                     END IF;
                 ----------------------------------------------
                 
-                ----------------------------------------------
-                WHEN S_COPY_E           =>
-                    -- SELECTION -------
-                    ERROR_SEL           <= "01";
-                    ERRORPP_SEL         <= "01";
+--                ----------------------------------------------
+--                WHEN S_COPY_E           =>
+--                    -- SELECTION -------
+--                    ERROR_SEL           <= "01";
+--                    ERRORPP_SEL         <= "01";
                     
-                    -- COUNTER ---------
-                    CNT_COMPE_RST       <= '0';
-                    CNT_COMPE_EN        <= '1';
+--                    -- COUNTER ---------
+--                    CNT_COMPE_RST       <= '0';
+--                    CNT_COMPE_EN        <= '1';
                     
-                    CNT_COPY_RST        <= '0';
+--                    CNT_COPY_RST        <= '0';
 
-                    -- THRESHOLD -------
-                    DECODER_RES_RST     <= '0';
+--                    -- THRESHOLD -------
+--                    DECODER_RES_RST     <= '0';
                                         
-                    IF CNT_COPY_DONE = '1' THEN
-                        STATE           <= S_HASH_L;
-                    ELSE
-                        STATE           <= S_COPY_E;
-                    END IF;
-                ----------------------------------------------
+--                    IF CNT_COPY_DONE = '1' THEN
+--                        STATE           <= S_HASH_L;
+--                    ELSE
+--                        STATE           <= S_COPY_E;
+--                    END IF;
+--                ----------------------------------------------
 
                 ----------------------------------------------
                 WHEN S_HASH_L  =>
                     -- SELECTION -------
                     SYNDROME_SEL        <= "00";
-                    ERROR_SEL           <= "10";
               
                     -- COUNTER ---------
                     CNT_NBITER_RST      <= '0';
@@ -1629,7 +1473,6 @@ BEGIN
                     DECODER_RES_RST     <= '0';
 
                     -- SELECTION -------
-                    ERROR_SEL           <= "11";
                     ERRORPP_SEL         <= "11";
                     HW_SEL              <= "11";
 
@@ -1658,7 +1501,6 @@ BEGIN
                     DECODER_RES_RST     <= '0';
                 
                     -- SELECTION -------
-                    ERROR_SEL           <= "11";
                     ERRORPP_SEL         <= "11";
                     HW_SEL              <= "11";
 

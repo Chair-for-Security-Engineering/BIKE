@@ -62,8 +62,6 @@ ARCHITECTURE Structural OF TB_BIKE IS
         C_IN_ADDR               : IN  STD_LOGIC_VECTOR(LOG2(R_BLOCKS)-1 DOWNTO 0);
         C0_IN_VALID             : IN  STD_LOGIC;
         C1_IN_VALID             : IN  STD_LOGIC;
-        -- RANDOMNESS ------------------
-        ERROR_RAND              : IN  STD_LOGIC_VECTOR(LOG2(2*R_BITS+1)-1 DOWNTO 0);
         -- SECRET KEY ------------------
         SK0_IN_DIN              : IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
         SK1_IN_DIN              : IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
@@ -137,8 +135,6 @@ BEGIN
         C_IN_ADDR               => C_IN_ADDR,
         C0_IN_VALID             => C0_IN_VALID,
         C1_IN_VALID             => C1_IN_VALID,
-        -- RANDOMNESS ------------------
-        ERROR_RAND              => ERROR_RAND,
         -- SECRET KEY ------------------
         SK0_IN_DIN              => SK0_IN_DIN,
         SK1_IN_DIN              => SK1_IN_DIN,
@@ -168,27 +164,24 @@ BEGIN
     -- STIMULUS PROCESS ----------------------------------------------------------
     STIM_PROCESS : PROCESS
         -- INPUT FILES -----------------------------------------------------------
-        FILE FILE_SK0                   : TEXT open READ_MODE is "C:\Users\Jan\NextcloudSecEng\10 - Research\02 - BIKE\01 - VHDL\30 - Paper\02 - Decapsulation\Level 3 - scalable\D128\hdl\tv\sk0.txt";
-        FILE FILE_SK1                   : TEXT open READ_MODE is "C:\Users\Jan\NextcloudSecEng\10 - Research\02 - BIKE\01 - VHDL\30 - Paper\02 - Decapsulation\Level 3 - scalable\D128\hdl\tv\sk1.txt";
-        FILE FILE_SK0_COMPACT           : TEXT open READ_MODE is "C:\Users\Jan\NextcloudSecEng\10 - Research\02 - BIKE\01 - VHDL\30 - Paper\02 - Decapsulation\Level 3 - scalable\D128\hdl\tv\sk0_compact.txt";
-        FILE FILE_SK1_COMPACT           : TEXT open READ_MODE is "C:\Users\Jan\NextcloudSecEng\10 - Research\02 - BIKE\01 - VHDL\30 - Paper\02 - Decapsulation\Level 3 - scalable\D128\hdl\tv\sk1_compact.txt";
-        FILE FILE_SIGMA                 : TEXT open READ_MODE is "C:\Users\Jan\NextcloudSecEng\10 - Research\02 - BIKE\01 - VHDL\30 - Paper\02 - Decapsulation\Level 3 - scalable\D128\hdl\tv\sigma.txt";
-        FILE FILE_C                     : TEXT open READ_MODE is "C:\Users\Jan\NextcloudSecEng\10 - Research\02 - BIKE\01 - VHDL\30 - Paper\02 - Decapsulation\Level 3 - scalable\D128\hdl\tv\c.txt";
-        FILE FILE_E                     : TEXT open READ_MODE is "C:\Users\Jan\NextcloudSecEng\10 - Research\02 - BIKE\01 - VHDL\30 - Paper\02 - Decapsulation\Level 3 - scalable\D128\hdl\tv\e.txt";
+        FILE FILE_SK0                   : TEXT open READ_MODE is "path_to_project\hdl\tv\sk0.txt";
+        FILE FILE_SK1                   : TEXT open READ_MODE is "path_to_project\hdl\tv\sk1.txt";
+        FILE FILE_SK0_COMPACT           : TEXT open READ_MODE is "path_to_project\hdl\tv\sk0_compact.txt";
+        FILE FILE_SK1_COMPACT           : TEXT open READ_MODE is "path_to_project\hdl\tv\sk1_compact.txt";
+        FILE FILE_SIGMA                 : TEXT open READ_MODE is "path_to_project\hdl\tv\sigma.txt";
+        FILE FILE_C                     : TEXT open READ_MODE is "path_to_project\hdl\tv\c.txt";
         VARIABLE V_ILINE_SK0            : LINE;
         VARIABLE V_ILINE_SK1            : LINE;
         VARIABLE V_ILINE_SK0_COMPACT    : LINE;
         VARIABLE V_ILINE_SK1_COMPACT    : LINE;
         VARIABLE V_ILINE_SIGMA          : LINE;
         VARIABLE V_ILINE_C              : LINE;
-        VARIABLE V_ILINE_E              : LINE;
         VARIABLE V_SK0                  : STD_LOGIC_VECTOR(31 downto 0);
         VARIABLE V_SK1                  : STD_LOGIC_VECTOR(31 downto 0);
         VARIABLE V_SK0_COMPACT          : STD_LOGIC_VECTOR(LOG2(R_BITS)-1 downto 0);
         VARIABLE V_SK1_COMPACT          : STD_LOGIC_VECTOR(LOG2(R_BITS)-1 downto 0);
         VARIABLE V_SIGMA                : STD_LOGIC_VECTOR(31 downto 0);
         VARIABLE V_C                    : STD_LOGIC_VECTOR(31 downto 0);
-        VARIABLE V_E                    : STD_LOGIC_VECTOR(LOG2(2*R_BITS)-1 downto 0);
         VARIABLE C_TRIGGER              : STD_LOGIC := '0';
         VARIABLE E_TRIGGER              : STD_LOGIC := '0';
         VARIABLE SK_ADDR                : STD_LOGIC_VECTOR(LOG2(R_BLOCKS)-1 DOWNTO 0) := (OTHERS => '0');
@@ -196,7 +189,7 @@ BEGIN
         VARIABLE SIGMA_ADDR             : STD_LOGIC_VECTOR(LOG2(CEIL(L,32))-1 DOWNTO 0) := (OTHERS => '0');
         VARIABLE C_ADDR                 : STD_LOGIC_VECTOR(LOG2(R_BLOCKS)-1 DOWNTO 0) := (OTHERS => '0');
         -- TV OUTPUT
-        FILE FILE_HASH                  : TEXT open READ_MODE is "C:\Users\Jan\NextcloudSecEng\10 - Research\02 - BIKE\01 - VHDL\30 - Paper\02 - Decapsulation\Level 3 - scalable\D128\hdl\tv\k.txt";
+        FILE FILE_HASH                  : TEXT open READ_MODE is "path_to_project\hdl\tv\k.txt";
         VARIABLE V_ILINE_HASH           : LINE;
         VARIABLE V_HASH                 : STD_LOGIC_VECTOR(31 DOWNTO 0);
         VARIABLE CORRECT_HASH           : STD_LOGIC := '1';
@@ -353,27 +346,7 @@ BEGIN
         --------------------------------
         ENABLE          <= '1';
         
-        WAIT FOR 2*CLK_PERIOD;
-        
-        -- ERROR -------------------
-        WHILE (NOT endfile(FILE_E)) LOOP
-            IF E_TRIGGER = '0' THEN
-                readline(FILE_E, V_ILINE_E);
-                read(V_ILINE_E, V_E);
-                
-                ERROR_RAND  <= V_E;
-                
-                E_TRIGGER := '1';
-            ELSE
-                E_TRIGGER := '0';
-            END IF;
-            
-            WAIT FOR CLK_PERIOD;
-        END LOOP;
-        
-        file_close(FILE_E);
-        ERROR_RAND <= (OTHERS => '0');      
-        --------------------------------        
+        WAIT FOR 2*CLK_PERIOD;     
 
         
         -- VERIFY HASH -----------------
